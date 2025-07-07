@@ -1,0 +1,175 @@
+import os
+from dotenv import load_dotenv 
+import discord
+from discord.ext import commands
+from keep_alive import keep_alive
+import random
+import json
+
+load_dotenv()
+token = os.getenv('DISCORD_BOT_TOKEN')
+
+intents = discord.Intents.all()
+intents.message_content = True
+
+bot = commands.Bot(command_prefix='!', intents=intents)
+
+# Liste des traits (déplacée au niveau global)
+traits = ["Ambitieux","Appliqué","Arrogant","Brave","Calme","Chaste","Colérique","Compatissant","Confiant","Content","Cupide","Cynique","Entêté","Excentrique","Fourbe","Généreux","Gourmand","Honnête","Humble","Impatient","Inconstant","Indulgent","Juste","Lâche","Lubrique","Paranoïaque","Paresseux","Partial","Patient","Sadique","Sans cœur","Sociable","Tempéré","Timide","Vindicatif","Zélé"]
+
+# Liste des traits incompatibles (déplacée au niveau global)
+incompatible = {
+    "Ambitieux": {"Content"},
+    "Appliqué": {"Paresseux"},
+    "Arrogant": {"Humble"},
+    "Brave": {"Lâche"},
+    "Calme": {"Colérique"},
+    "Chaste": {"Lubrique"},
+    "Colérique": {"Calme"},
+    "Compatissant": {"Sadique","Sans cœur"},
+    "Confiant": {"Paranoïaque"},
+    "Content": {"Ambitieux"},
+    "Cupide": {"Généreux"},
+    "Cynique": {"Zélé"},
+    "Entêté": {"Inconstant","Excentrique"},
+    "Excentrique": {"Entêté","Inconstant"},
+    "Fourbe": {"Honnête"},
+    "Généreux": {"Cupide"},
+    "Gourmand": {"Tempéré"},
+    "Honnête": {"Fourbe"},
+    "Inconstant": {"Entêté","Excentrique"},
+    "Indulgent": {"Vindicatif"},
+    "Juste": {"Partial"},
+    "Lâche": {"Brave"},
+    "Lubrique": {"Chaste"},
+    "Paranoïaque": {"Confiant"},
+    "Paresseux": {"Appliqué"},
+    "Partial": {"Juste"},
+    "Patient": {"Impatient"},
+    "Sadique": {"Sans cœur","Compatissant"},
+    "Sans cœur": {"Sadique","Compatissant"},
+    "Sociable": {"Timide"},
+    "Tempéré": {"Gourmand"},
+    "Timide": {"Sociable"},
+    "Vindicatif": {"Indulgent"},
+    "Zélé": {"Cynique"}
+}
+
+def tirage_compatible(traits, incompatible, nb_tirages=3):
+    tirage = []
+    disponibles = set(traits)
+
+    while len(tirage) < nb_tirages and disponibles:
+        choix = random.choice(list(disponibles))
+        tirage.append(choix)
+        incompatibles = incompatible.get(choix, set())
+        disponibles -= incompatibles
+        disponibles.discard(choix)
+
+    return tirage
+
+# Fichier de sauvegarde
+SAVE_FILE = "tirages.json"
+
+# Charger les tirages enregistrés
+if os.path.exists(SAVE_FILE):
+    with open(SAVE_FILE, "r") as f:
+        tirages_enregistres = json.load(f)
+else:
+    tirages_enregistres = {}
+
+# Vérifier s'il y a des conflits entre les traits
+def sont_compatibles(traits_tires):
+    for trait in traits_tires:
+        if trait in incompatible:
+            for incompatible_trait in incompatible[trait]:
+                if incompatible_trait in traits_tires:
+                    return False
+    return True
+
+@bot.event
+async def on_ready():
+    print("🟢 Votre tirage est prêt !")
+
+@bot.command(name='tirage')
+async def tirage(ctx):
+    user_id = str(ctx.author.id)
+
+    if user_id in tirages_enregistres:
+        traits_existants = tirages_enregistres[user_id]
+        await ctx.send(
+            f"⛔ Tu as déjà tiré tes traits ! Voici ceux que je t’ai attribués :\n"
+            f"🔹 {traits_existants[0]}\n"
+            f"🔹 {traits_existants[1]}\n"
+            f"🔹 {traits_existants[2]}"
+        )
+        return
+
+    # Tirage aléatoire jusqu'à obtention de 3 traits compatibles
+    while True:
+        tirage_traits = random.sample(traits, 3)
+        if sont_compatibles(tirage_traits):
+            break
+
+    # Sauvegarder le tirage
+    tirages_enregistres[user_id] = tirage_traits
+    with open(SAVE_FILE, "w") as f:
+        json.dump(tirages_enregistres, f, indent=4)
+
+    await ctx.send(
+        f"🧠 **Voici les traits de ton personnage RP :**\n"
+        f"🔹 {tirage_traits[0]}\n"
+        f"🔹 {tirage_traits[1]}\n"
+        f"🔹 {tirage_traits[2]}"
+    )
+
+@bot.command(name='reinitialiser')
+@commands.has_permissions(manage_messages=True)
+async def reinitialiser(ctx, member: discord.Member):
+    user_id = str(member.id)
+
+    if user_id in tirages_enregistres:
+        del tirages_enregistres[user_id]
+        with open(SAVE_FILE, "w") as f:
+            json.dump(tirages_enregistres, f, indent=4)
+        await ctx.send(f"✅ Les traits de {member.mention} ont été réinitialisés.")
+    else:
+        await ctx.send(f"⛔ {member.mention} n'avait pas encore effectué de tirage.")
+
+@reinitialiser.error
+async def reinitialiser_error(ctx, error):
+    if isinstance(error, commands.MissingPermissions):
+        await ctx.send("⛔ Tu n'as pas la permission de faire cela.")
+    elif isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send("⛔ Tu dois mentionner un utilisateur à réinitialiser.")
+
+@bot.command(help="Cette commande te permet d'en savoir plus sur moi et sur mes fonctions !")
+async def guide(ctx):
+    await ctx.send(f"""*🏛️ Salutations, noble voyageur, je suppose que tu dois être* **{ctx.author}** !
+
+👑 Je serai ton guide dans ton périple, scribe éternel et gardien de la mémoire **__d'Historia Universalis__**. Mon devoir est simple : t'accompagner dans ton aventure au cœur des âges.
+
+📜 Ici, le **rôleplay historique** est au centre de tout. Que tu sois un humble paysan ou un empereur en devenir, ton histoire mérite d'être écrite.
+
+📌 __Deux commandes sont essentielles pour commencer :__
+
+🔹 **!presentation** — Je te conterai en quelques mots les fondements d'Historia Universalis, son monde, ses règles, et l'esprit de ce lieu.
+🔹 **!tirage** — Grâce à cette commande, je te confierai trois traits de caractère tirés au sort. Ils façonneront ton personnage RP et guideront ses choix, ses qualités… ou ses faiblesses.
+
+🧠 **__Prends garde :__** ce tirage est unique pour chaque personnage que tu joueras et déterminera **ton identité au sein du RP**, donc... Réfléchis bien avant de te lancer !
+
+*✍️ L'Histoire attend que tu y laisses ton empreinte. Et moi… je suis là pour la consigner !*""")
+
+@bot.event
+async def on_message(message):
+    if message.author.bot:
+        return
+    elif message.content.startswith('Bonjour') or message.content.startswith('Salut'):
+        await message.channel.send("Bonjour ! Je suis le bot d'**Historia Universalis**. Pour en savoir plus sur **mes fonctions**, utilise la commande **!help** !")
+
+    # Permettre aux autres commandes de fonctionner
+    await bot.process_commands(message)
+
+keep_alive()
+token = os.environ['DISCORD_BOT_TOKEN']
+bot.run(token)
